@@ -20,6 +20,7 @@ Move* generate(const Board& b, Move* moves, const bool force) {
     Bitboard searched[COL_NB][searchSize];
     Bitboard moveset[COL_NB][movesetSize] = {};
     Bitboard spinset[COL_NB][ROTATION_NB][p == T ? SPIN_NB : 0] = {};
+    Bitboard spinmap[COL_NB][p == T ? 1 + ROTATION_NB : 0] = {};
     Bitboard remaining = 0;
 
     int total = -(p == T);
@@ -29,6 +30,37 @@ Move* generate(const Board& b, Move* moves, const bool force) {
     for (int x = 0; x < COL_NB; ++x)
         for (int r = 0; r < searchSize; ++r)
             searched[x][r] = cm[x][static_cast<Rotation>(r)];
+
+    if constexpr (p == T) {
+        auto init = [&]<int x>{
+            const Bitboard corners[] = {
+                x > 0 ? b[x - 1] >> 1 : ~0ULL,
+                x < 9 ? b[x + 1] >> 1 : ~0ULL,
+                x < 9 ? (b[x + 1] << 1 | 1) : ~0ULL,
+                x > 0 ? (b[x - 1] << 1 | 1) : ~0ULL
+            };
+
+            const Bitboard spins = (
+                (corners[0] & corners[1] & (corners[2] | corners[3])) |
+                (corners[2] & corners[3] & (corners[0] | corners[1]))
+            );
+
+            spinmap[x][0] = spins;
+            if (spins) {
+                auto process = [&]<Rotation r>{
+                    if (Gen::in_bounds<T, r>(x))
+                        spinmap[x][1 + r] = spins & corners[r] & corners[Gen::rotate<Gen::Direction::CW>(r)];
+                };
+                [&]<size_t... rs>(std::index_sequence<rs...>) {
+                    (process.template operator()<static_cast<Rotation>(rs)>(), ...);
+                }(std::make_index_sequence<ROTATION_NB>());
+            }
+        };
+
+        [&]<size_t... xs>(std::index_sequence<xs...>) {
+            (init.template operator()<xs>(), ...);
+        }(std::make_index_sequence<COL_NB>());
+    }
 
     if ([&]{
             Bitboard m = b[0];
@@ -69,7 +101,7 @@ Move* generate(const Board& b, Move* moves, const bool force) {
             };
             [&]<size_t... rs>(std::index_sequence<rs...>) {
                 ((is_ok(static_cast<Rotation>(rs)) && Gen::in_bounds<p, static_cast<Rotation>(rs)>(x) ? process.template operator()<static_cast<Rotation>(rs)>() : void()), ...);
-            }(std::make_index_sequence<p == O ? 1 : ROTATION_NB>());
+            }(std::make_index_sequence<searchSize>());
         };
 
         [&]<size_t... xs>(std::index_sequence<xs...>) {
@@ -79,6 +111,7 @@ Move* generate(const Board& b, Move* moves, const bool force) {
         if (p != T && !total)
             return moves;
     }
+
     while (remaining) {
         const int index = ctz(remaining);
         const int x = index >> 2;
@@ -200,17 +233,7 @@ Move* generate(const Board& b, Move* moves, const bool force) {
                     current ^= (m << threshold) >> y1;
 
                     if constexpr (p == T) {
-                        const Bitboard corners[] = {
-                            x1 > 0 ? b[x1 - 1] >> 1 : ~0ULL,
-                            x1 < 9 ? b[x1 + 1] >> 1 : ~0ULL,
-                            x1 < 9 ? (b[x1 + 1] << 1 | 1) : ~0ULL,
-                            x1 > 0 ? (b[x1 - 1] << 1 | 1) : ~0ULL
-                        };
-
-                        const Bitboard spins = m & (
-                            (corners[0] & corners[1] & (corners[2] | corners[3])) |
-                            (corners[2] & corners[3] & (corners[0] | corners[1]))
-                        );
+                        const Bitboard spins = m & spinmap[x1][0];
 
                         spinset[x1][r1][NO_SPIN] |= m ^ spins;
 
@@ -218,9 +241,8 @@ Move* generate(const Board& b, Move* moves, const bool force) {
                             if (i >= 4)
                                 spinset[x1][r1][FULL] |= spins;
                             else {
-                                const Bitboard full = spins & corners[r1] & corners[Gen::rotate<Gen::Direction::CW>(r1)];
-                                spinset[x1][r1][MINI] |= spins ^ full;
-                                spinset[x1][r1][FULL] |= full;
+                                spinset[x1][r1][MINI] |= spins & ~spinmap[x1][1 + r1];
+                                spinset[x1][r1][FULL] |= spins & spinmap[x1][1 + r1];
                             }
                         }
                     }
