@@ -25,8 +25,8 @@ uint64_t perft(State& state, const Piece* next, unsigned depth) {
 
 void bench_perft() {
     // Depth should be <= the queue size, but that is left to the user
-    constexpr unsigned depth = 6;
-    const Piece queue[] = {I, O, T, L, J, S, Z};
+    constexpr unsigned depth = 7;
+    const Piece queue[] = {I, O, L, J, S, Z, T};
     State state;
     state.init();
 

@@ -9,58 +9,28 @@
 
 namespace Cobra {
 
-template<Piece p>
-Move* generate(const Board& b, Move* moves, const bool force) {
-    static_assert(is_ok(p));
-    const Gen::CollisionMap<p> cm(b);
+const Bitboard spinmapDummy[COL_NB][1 + ROTATION_NB] = {};
 
+template<Piece p1>
+Move* generate(const Board& b, Move* moves, const bool force, const Gen::CollisionMap<p1 == TSPIN ? T : p1>& cm, [[maybe_unused]] const Bitboard (&spinmap)[COL_NB][1 + ROTATION_NB] = spinmapDummy) {
+    constexpr Piece p = p1 == TSPIN ? T : p1;
+    constexpr bool checkSpin = p1 == TSPIN;
     constexpr int movesetSize = p == O ? 1 : (p == I || p == S || p == Z) ? 2 : 4;
     constexpr int searchSize = p == O ? 1 : ROTATION_NB;
+    static_assert(is_ok(p));
+    
+    int total = 0;
+    Bitboard remaining = 0;
     Bitboard toSearch[COL_NB][searchSize] = {};
     Bitboard searched[COL_NB][searchSize];
     Bitboard moveset[COL_NB][movesetSize] = {};
-    Bitboard spinset[COL_NB][ROTATION_NB][p == T ? SPIN_NB : 0] = {};
-    Bitboard spinmap[COL_NB][p == T ? 1 + ROTATION_NB : 0] = {};
-    Bitboard remaining = 0;
-
-    int total = -(p == T);
+    Bitboard spinset[COL_NB][ROTATION_NB][checkSpin ? SPIN_NB : 0] = {};
 
     auto remaining_index = [](int x, Rotation r) { return bb(x * ROTATION_NB + r); };
 
     for (int x = 0; x < COL_NB; ++x)
         for (int r = 0; r < searchSize; ++r)
             searched[x][r] = cm[x][static_cast<Rotation>(r)];
-
-    if constexpr (p == T) {
-        auto init = [&]<int x>{
-            const Bitboard corners[] = {
-                x > 0 ? b[x - 1] >> 1 : ~0ULL,
-                x < 9 ? b[x + 1] >> 1 : ~0ULL,
-                x < 9 ? (b[x + 1] << 1 | 1) : ~0ULL,
-                x > 0 ? (b[x - 1] << 1 | 1) : ~0ULL
-            };
-
-            const Bitboard spins = (
-                (corners[0] & corners[1] & (corners[2] | corners[3])) |
-                (corners[2] & corners[3] & (corners[0] | corners[1]))
-            );
-
-            spinmap[x][0] = spins;
-            if (spins) {
-                auto process = [&]<Rotation r>{
-                    if (Gen::in_bounds<T, r>(x))
-                        spinmap[x][1 + r] = spins & corners[r] & corners[Gen::rotate<Gen::Direction::CW>(r)];
-                };
-                [&]<size_t... rs>(std::index_sequence<rs...>) {
-                    (process.template operator()<static_cast<Rotation>(rs)>(), ...);
-                }(std::make_index_sequence<ROTATION_NB>());
-            }
-        };
-
-        [&]<size_t... xs>(std::index_sequence<xs...>) {
-            (init.template operator()<xs>(), ...);
-        }(std::make_index_sequence<COL_NB>());
-    }
 
     if ([&]{
             Bitboard m = b[0];
@@ -80,27 +50,30 @@ Move* generate(const Board& b, Move* moves, const bool force) {
 
         toSearch[Gen::SPAWN_COL][NORTH] = spawn;
         remaining |= remaining_index(Gen::SPAWN_COL, NORTH);
-        if constexpr (p == T)
+        if constexpr (checkSpin)
             spinset[Gen::SPAWN_COL][NORTH][NO_SPIN] = spawn;
     } else {
         auto init = [&]<int x>{
             auto process = [&]<Rotation r>{
+                if constexpr (!Gen::in_bounds<p, r>(x))
+                    return;
+
                 assert(cm[x][r] != ~0ULL);
                 const int y = bitlen(cm[x][r]);
                 const Bitboard surface = bb_low(Gen::SPAWN_ROW) & ~bb_low(y);
 
                 searched[x][r] |= toSearch[x][r] = surface;
                 remaining |= remaining_index(x, r);
-                if constexpr (p == T)
+                if constexpr (checkSpin)
                     spinset[x][r][NO_SPIN] = surface;
-
-                if constexpr (p != T && r < movesetSize) {
+                else if constexpr (r < movesetSize) {
                     *moves++ = Move(p, r, x, y);
                     total += popcount(~cm[x][r] & ((cm[x][r] << 1) | 1)) - 1;
                 }
             };
+
             [&]<size_t... rs>(std::index_sequence<rs...>) {
-                ((is_ok(static_cast<Rotation>(rs)) && Gen::in_bounds<p, static_cast<Rotation>(rs)>(x) ? process.template operator()<static_cast<Rotation>(rs)>() : void()), ...);
+                (process.template operator()<static_cast<Rotation>(rs)>(), ...);
             }(std::make_index_sequence<searchSize>());
         };
 
@@ -108,8 +81,9 @@ Move* generate(const Board& b, Move* moves, const bool force) {
             (init.template operator()<xs>(), ...);
         }(std::make_index_sequence<COL_NB>());
 
-        if (p != T && !total)
-            return moves;
+        if constexpr (!checkSpin)
+            if (!total)
+                return moves;
     }
 
     while (remaining) {
@@ -124,7 +98,7 @@ Move* generate(const Board& b, Move* moves, const bool force) {
 
         // Softdrops
         {
-            if constexpr (p == T) {
+            if constexpr (checkSpin) {
                 Bitboard m = (toSearch[x][r] >> 1) & ~cm[x][r];
                 while ((m & toSearch[x][r]) != m) {
                     toSearch[x][r] |= m;
@@ -150,7 +124,7 @@ Move* generate(const Board& b, Move* moves, const bool force) {
         // Harddrops
         {
             Bitboard m = toSearch[x][r] & ((cm[x][r] << 1) | 1);
-            if constexpr (p != T)
+            if constexpr (!checkSpin)
                 m &= ~searched[x][r];
 
             if (m) {
@@ -183,7 +157,7 @@ Move* generate(const Board& b, Move* moves, const bool force) {
                 assert(!(m & cm[x1][r1]));
                 assert(((m >> 1) & cm[x1][r1]) == (m >> 1));
 
-                if constexpr (p != T) {
+                if constexpr (!checkSpin) {
                     if (m &= ~moveset[x1][r1]) {
                         moveset[x1][r1] |= m;
                         total -= popcount(m);
@@ -206,7 +180,7 @@ Move* generate(const Board& b, Move* moves, const bool force) {
                 if (m) {
                     toSearch[x + dx][r] |= m;
                     remaining |= remaining_index(x + dx, r);
-                    if constexpr (p == T)
+                    if constexpr (checkSpin)
                         spinset[x + dx][r][NO_SPIN] |= m;
                 }
             };
@@ -232,7 +206,7 @@ Move* generate(const Board& b, Move* moves, const bool force) {
                     Bitboard m = ((current << y1) >> threshold) & ~cm[x1][r1];
                     current ^= (m << threshold) >> y1;
 
-                    if constexpr (p == T) {
+                    if constexpr (checkSpin) {
                         const Bitboard spins = m & spinmap[x1][0];
 
                         spinset[x1][r1][NO_SPIN] |= m ^ spins;
@@ -264,7 +238,7 @@ Move* generate(const Board& b, Move* moves, const bool force) {
         remaining ^= bb(index);
     }
 
-    if constexpr (p == T)
+    if constexpr (checkSpin)
         for (int x = 0; x < COL_NB; ++x)
             for (int r = 0; r < movesetSize; ++r) {
                 if (!moveset[x][r])
@@ -284,13 +258,57 @@ Move* generate(const Board& b, Move* moves, const bool force) {
 
 Move* generate(const Board& b, Move* moves, const Piece p, const bool force) {
     switch(p) {
-        case I: return generate<I>(b, moves, force);
-        case O: return generate<O>(b, moves, force);
-        case T: return generate<T>(b, moves, force);
-        case L: return generate<L>(b, moves, force);
-        case J: return generate<J>(b, moves, force);
-        case S: return generate<S>(b, moves, force);
-        case Z: return generate<Z>(b, moves, force);
+        case I: return generate<I>(b, moves, force, Gen::CollisionMap<I>(b));
+        case O: return generate<O>(b, moves, force, Gen::CollisionMap<O>(b));
+        case T:
+            {
+                const Gen::CollisionMap<T> cm(b);
+                bool checkSpin = false;
+                Bitboard spinmap[COL_NB][1 + ROTATION_NB] = {};
+                auto init = [&]<int x>{
+                    const Bitboard corners[] = {
+                        x > 0 ? b[x - 1] >> 1 : ~0ULL,
+                        x < 9 ? b[x + 1] >> 1 : ~0ULL,
+                        x < 9 ? (b[x + 1] << 1 | 1) : ~0ULL,
+                        x > 0 ? (b[x - 1] << 1 | 1) : ~0ULL
+                    };
+
+                    const Bitboard spins = (
+                        (corners[0] & corners[1] & (corners[2] | corners[3])) |
+                        (corners[2] & corners[3] & (corners[0] | corners[1]))
+                    );
+
+                    spinmap[x][0] = spins;
+                    if (spins) {
+                        Bitboard temp = 0;
+                        auto process = [&]<Rotation r>{
+                            if (Gen::in_bounds<T, r>(x)) {
+                                spinmap[x][1 + r] = spins & corners[r] & corners[Gen::rotate<Gen::Direction::CW>(r)];
+                                temp |= spins & ~cm[x][r] & ((cm[x][r] << 1) | 1);
+                            }
+                        };
+
+                        [&]<size_t... rs>(std::index_sequence<rs...>) {
+                            (process.template operator()<static_cast<Rotation>(rs)>(), ...);
+                        }(std::make_index_sequence<ROTATION_NB>());
+                        
+                        if (temp)
+                            checkSpin = true;
+                    }
+                };
+
+                [&]<size_t... xs>(std::index_sequence<xs...>) {
+                    (init.template operator()<xs>(), ...);
+                }(std::make_index_sequence<COL_NB>());
+
+                if (checkSpin)
+                    return generate<TSPIN>(b, moves, force, cm, spinmap);
+                return generate<T>(b, moves, force, cm);
+            }
+        case L: return generate<L>(b, moves, force, Gen::CollisionMap<L>(b));
+        case J: return generate<J>(b, moves, force, Gen::CollisionMap<J>(b));
+        case S: return generate<S>(b, moves, force, Gen::CollisionMap<S>(b));
+        case Z: return generate<Z>(b, moves, force, Gen::CollisionMap<Z>(b));
         default: __builtin_unreachable();
     }
 }
