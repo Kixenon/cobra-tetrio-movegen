@@ -18,7 +18,7 @@ Move* generate(const Board& b, Move* moves, const bool force, const Gen::Collisi
     constexpr int moveSetSize = p == O ? 1 : (p == I || p == S || p == Z) ? 2 : 4;
     constexpr int searchSize = p == O ? 1 : ROTATION_NB;
     static_assert(is_ok(p));
-    
+
     int total = 0;
     Bitboard remaining = 0;
     Bitboard toSearch[COL_NB][searchSize] = {};
@@ -122,41 +122,41 @@ Move* generate(const Board& b, Move* moves, const bool force, const Gen::Collisi
 
         // Harddrops
         {
-            Bitboard m = toSearch[x][r] & ((cm[x][r] << 1) | 1);
-            if constexpr (!checkSpin)
-                m &= ~searched[x][r];
+            if constexpr (checkSpin)
+                moveSet[x][r] |= toSearch[x][r] & ((cm[x][r] << 1) | 1);
+            else {
+                Bitboard m = toSearch[x][r] & ((cm[x][r] << 1) | 1) & ~searched[x][r];
 
-            if (m) {
-                const Rotation r1 = [&]{
-                    if constexpr (p == O)
-                        return NORTH;
-                    if constexpr (p == I || p == S || p == Z)
-                        return static_cast<Rotation>(r & 1);
-                    return r; // L/J/T
-                }();
+                if (m) {
+                    const Rotation r1 = [&]{
+                        if constexpr (p == O)
+                            return NORTH;
+                        if constexpr (p == I || p == S || p == Z)
+                            return static_cast<Rotation>(r & 1);
+                        return r; // L/J/T
+                    }();
 
-                const int x1 = x - [&]() -> int {
-                    if constexpr (p == O)
-                        return r == WEST || r == SOUTH;
-                    if constexpr (p == I)
-                        return r == SOUTH;
-                    if constexpr (p == S || p == Z)
-                        return r == WEST;
-                    return 0; // L/J/T
-                }();
+                    const int x1 = x - [&]() -> int {
+                        if constexpr (p == O)
+                            return r == WEST || r == SOUTH;
+                        if constexpr (p == I)
+                            return r == SOUTH;
+                        if constexpr (p == S || p == Z)
+                            return r == WEST;
+                        return 0; // L/J/T
+                    }();
 
-                if constexpr (p != L && p != J && p != T) {
-                    m >>= (p == O && (r == EAST || r == SOUTH));
-                    m >>= ((p == S || p == Z) && (r == SOUTH));
-                    m <<= (p == I && r == WEST);
-                }
+                    if constexpr (p != L && p != J && p != T) {
+                        m >>= (p == O && (r == EAST || r == SOUTH));
+                        m >>= ((p == S || p == Z) && (r == SOUTH));
+                        m <<= (p == I && r == WEST);
+                    }
 
-                assert(is_ok_x(x1));
-                assert(is_ok(r1));
-                assert(!(m & cm[x1][r1]));
-                assert(((m >> 1) & cm[x1][r1]) == (m >> 1));
+                    assert(is_ok_x(x1));
+                    assert(is_ok(r1));
+                    assert(!(m & cm[x1][r1]));
+                    assert(((m >> 1) & cm[x1][r1]) == (m >> 1));
 
-                if constexpr (!checkSpin) {
                     if (m &= ~moveSet[x1][r1]) {
                         moveSet[x1][r1] |= m;
                         total -= popcount(m);
@@ -167,14 +167,13 @@ Move* generate(const Board& b, Move* moves, const bool force, const Gen::Collisi
                         if (!total)
                             return moves;
                     }
-                } else
-                    moveSet[x1][r1] |= m;
+                }
             }
         }
 
         // Shift
         {
-            auto shift = [&](const int x1) {
+            auto shift = [&](int x1) {
                 const Bitboard m = toSearch[x][r] & ~searched[x1][r];
                 if (m) {
                     toSearch[x1][r] |= m;
@@ -239,14 +238,14 @@ Move* generate(const Board& b, Move* moves, const bool force, const Gen::Collisi
 
     if constexpr (checkSpin)
         for (int x = 0; x < COL_NB; ++x)
-            for (int r = 0; r < moveSetSize; ++r) {
+            for (const Rotation r : allRotations) {
                 if (!moveSet[x][r])
                     continue;
 
                 for (const auto s : {NO_SPIN, MINI, FULL}) {
                     Bitboard current = moveSet[x][r] & spinSet[x][r][s];
                     while (current) {
-                        *moves++ = Move(s == NO_SPIN ? T : TSPIN, static_cast<Rotation>(r), x, ctz(current), s == FULL);
+                        *moves++ = Move(s == NO_SPIN ? T : TSPIN, r, x, ctz(current), s == FULL);
                         current &= current - 1;
                     }
                 }
@@ -279,20 +278,16 @@ Move* generate(const Board& b, Move* moves, const Piece p, const bool force) {
 
                     spinMap[x][0] = spins;
                     if (spins) {
-                        Bitboard temp = 0;
                         auto process = [&]<Rotation r>{
                             if (Gen::in_bounds<T, r>(x)) {
                                 spinMap[x][1 + r] = spins & corners[r] & corners[Gen::rotate<Gen::Direction::CW>(r)];
-                                temp |= spins & ~cm[x][r] & ((cm[x][r] << 1) | 1);
+                                checkSpin |= spins & ~cm[x][r] & ((cm[x][r] << 1) | 1);
                             }
                         };
 
                         [&]<size_t... rs>(std::index_sequence<rs...>) {
                             (process.template operator()<static_cast<Rotation>(rs)>(), ...);
                         }(std::make_index_sequence<ROTATION_NB>());
-                        
-                        if (temp)
-                            checkSpin = true;
                     }
                 };
 
