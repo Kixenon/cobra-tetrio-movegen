@@ -4,6 +4,7 @@
 #include "header.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <string>
 
 namespace Cobra {
@@ -49,8 +50,8 @@ struct MoveInfo {
 struct State {
     Board board;
     Piece hold;
-    int b2b;
-    int combo;
+    int16_t b2b;
+    int16_t combo;
 
     void init();
     MoveInfo do_move(const Move& move);
