@@ -18,15 +18,12 @@ bool Board::obstructed(const Move& move) const {
 }
 
 bool Board::empty() const {
-    Bitboard result = col[0];
-    for (int x = 1; x < COL_NB; ++x)
-        result |= col[x];
-    return !result;
+    return std::all_of(std::begin(col), std::end(col), [](Bitboard b) { return b == 0; });
 }
 
 Bitboard Board::line_clears() const {
     Bitboard result = col[0];
-    for (int x = 1; x < COL_NB; ++x)
+    for (int x = 1; x < COL_NB && result; ++x)
         result &= col[x];
     return result;
 }
