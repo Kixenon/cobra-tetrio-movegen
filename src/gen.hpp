@@ -20,8 +20,7 @@ consteval bool in_bounds(const int x) {
     static_assert(is_ok(p));
     static_assert(is_ok(r));
     constexpr PieceCoordinates pc = piece_table(p, r);
-    return is_ok_x(pc[0].x + x) && is_ok_x(pc[1].x + x) &&
-           is_ok_x(pc[2].x + x) && is_ok_x(pc[3].x + x);
+    return is_ok_x(pc[0].x + x) && is_ok_x(pc[1].x + x) && is_ok_x(pc[2].x + x) && is_ok_x(pc[3].x + x);
 }
 
 template<Piece p>
@@ -33,17 +32,18 @@ private:
 public:
     explicit CollisionMap(const Board& b) {
         auto init = [&]<int x, Rotation r>{
+            if constexpr (!in_bounds<p, r>(x))
+                return ~0ULL;
             constexpr PieceCoordinates pc = piece_table(p, r);
             Bitboard result = 0;
             for (size_t i = 0; i < 4; ++i)
-                result |= (pc[i].y < 0) ? ~(~b[x + pc[i].x] << -pc[i].y)
-                                       : (b[x + pc[i].x] >> pc[i].y);
+                result |= (pc[i].y < 0) ? ~(~b[x + pc[i].x] << -pc[i].y) : (b[x + pc[i].x] >> pc[i].y);
             return result;
         };
 
         [&]<size_t... xs>(std::index_sequence<xs...>) {
             auto init1 = [&]<Rotation r>{
-                ((board[xs][r] = in_bounds<p,r>(xs) ? init.template operator()<xs, r>() : ~0ULL), ...);
+                ((board[xs][r] = init.template operator()<xs, r>()), ...);
             };
 
             [&]<size_t... rs>(std::index_sequence<rs...>) {

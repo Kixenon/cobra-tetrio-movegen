@@ -12,7 +12,7 @@ namespace Cobra {
 const Bitboard spinMapDummy[COL_NB][1 + ROTATION_NB] = {};
 
 template<Piece p1>
-Move* generate(const Board& b, Move* moves, const bool force, const Gen::CollisionMap<p1 == TSPIN ? T : p1>& cm, [[maybe_unused]] const Bitboard (&spinMap)[COL_NB][1 + ROTATION_NB] = spinMapDummy) {
+Move* generate(Move* moves, const bool slow, const bool force, const Gen::CollisionMap<p1 == TSPIN ? T : p1>& cm, [[maybe_unused]] const Bitboard (&spinMap)[COL_NB][1 + ROTATION_NB] = spinMapDummy) {
     constexpr Piece p = p1 == TSPIN ? T : p1;
     constexpr bool checkSpin = p1 == TSPIN;
     constexpr int moveSetSize = p == O ? 1 : (p == I || p == S || p == Z) ? 2 : 4;
@@ -32,12 +32,7 @@ Move* generate(const Board& b, Move* moves, const bool force, const Gen::Collisi
         for (int r = 0; r < searchSize; ++r)
             searched[x][r] = cm[x][static_cast<Rotation>(r)];
 
-    if ([&]{
-            Bitboard m = b[0];
-            for (int i = 1; i < COL_NB; ++i)
-                m |= b[i];
-            return bitlen(m) > Gen::SPAWN_ROW - 3;
-        }()) {
+    if (slow) {
         const Bitboard spawn = [&]{
             if (force) {
                 const Bitboard s = ~cm[Gen::SPAWN_COL][NORTH] & (~0ULL << Gen::SPAWN_ROW);
@@ -255,9 +250,16 @@ Move* generate(const Board& b, Move* moves, const bool force, const Gen::Collisi
 }
 
 Move* generate(const Board& b, Move* moves, const Piece p, const bool force) {
+    const bool slow = [&]{
+        Bitboard m = b[0];
+        for (int i = 1; i < COL_NB; ++i)
+            m |= b[i];
+        return bitlen(m) > Gen::SPAWN_ROW - 3;
+    }();
+
     switch(p) {
-        case I: return generate<I>(b, moves, force, Gen::CollisionMap<I>(b));
-        case O: return generate<O>(b, moves, force, Gen::CollisionMap<O>(b));
+        case I: return generate<I>(moves, slow, force, Gen::CollisionMap<I>(b));
+        case O: return generate<O>(moves, slow, force, Gen::CollisionMap<O>(b));
         case T:
             {
                 const Gen::CollisionMap<T> cm(b);
@@ -296,13 +298,13 @@ Move* generate(const Board& b, Move* moves, const Piece p, const bool force) {
                 }(std::make_index_sequence<COL_NB>());
 
                 if (checkSpin)
-                    return generate<TSPIN>(b, moves, force, cm, spinMap);
-                return generate<T>(b, moves, force, cm);
+                    return generate<TSPIN>(moves, slow, force, cm, spinMap);
+                return generate<T>(moves, slow, force, cm);
             }
-        case L: return generate<L>(b, moves, force, Gen::CollisionMap<L>(b));
-        case J: return generate<J>(b, moves, force, Gen::CollisionMap<J>(b));
-        case S: return generate<S>(b, moves, force, Gen::CollisionMap<S>(b));
-        case Z: return generate<Z>(b, moves, force, Gen::CollisionMap<Z>(b));
+        case L: return generate<L>(moves, slow, force, Gen::CollisionMap<L>(b));
+        case J: return generate<J>(moves, slow, force, Gen::CollisionMap<J>(b));
+        case S: return generate<S>(moves, slow, force, Gen::CollisionMap<S>(b));
+        case Z: return generate<Z>(moves, slow, force, Gen::CollisionMap<Z>(b));
         default: __builtin_unreachable();
     }
 }
