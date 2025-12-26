@@ -4,6 +4,7 @@
 #include "board.hpp"
 #include "header.hpp"
 
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <utility>
@@ -24,10 +25,45 @@ consteval bool in_bounds(const int x) {
 }
 
 template<Piece p>
+consteval int canonical_size() {
+    if constexpr (p == O)
+        return 1;
+    if constexpr (p == I || p == S || p == Z)
+        return 2;
+    return 4; // L, J, T
+}
+
+template<Piece p>
+constexpr Rotation canonical_r(const Rotation r){
+    // if constexpr (p == O)
+    //     return NORTH;
+    if constexpr (p == I || p == S || p == Z)
+        return static_cast<Rotation>(r & 1);
+    return r; // L, J, T
+}
+
+template<Piece p>
+constexpr Coordinates canonical_offset(const Rotation r) {
+    if constexpr (p == I) {
+        if (r == SOUTH)
+            return {1, 0};
+        if (r == WEST)
+            return {0, 1}; 
+    }
+    if constexpr (p == S || p == Z) {
+        if (r == WEST)
+            return {1, 0};
+        if (r == SOUTH)
+            return {0, 1};
+    }
+    return {0, 0};
+}
+
+template<Piece p>
 class CollisionMap {
 private:
-    static constexpr int searchSize = p == O ? 1 : ROTATION_NB;
-    Bitboard board[COL_NB][searchSize];
+    static constexpr int canonicalSize = canonical_size<p>();
+    Bitboard board[COL_NB][canonicalSize];
 
 public:
     explicit CollisionMap(const Board& b) {
@@ -48,11 +84,13 @@ public:
 
             [&]<size_t... rs>(std::index_sequence<rs...>) {
                 (init1.template operator()<static_cast<Rotation>(rs)>(), ...);
-            }(std::make_index_sequence<searchSize>{});
+            }(std::make_index_sequence<canonicalSize>{});
         }(std::make_index_sequence<COL_NB>{});
     }
 
     const Bitboard* operator[](const int x) const { return board[x]; }
+
+    Bitboard operator()(const int x, const Rotation r) const { return board[x][canonical_r<p>(r)]; }
 };
 
 enum Direction {
@@ -70,66 +108,56 @@ constexpr Rotation rotate(const Rotation r) {
 }
 
 template<size_t N>
-class Offsets {
-private:
-    Coordinates coords[N];
+using Offsets = std::array<Coordinates, N>;
 
-public:
-    template<typename... Ts>
-    explicit constexpr Offsets(Ts... cs) : coords{cs...} {
-        static_assert(sizeof...(cs) == N);
-    }
+template<size_t N>
+using OffsetsRot = std::array<Offsets<N>, ROTATION_NB>;
 
-    constexpr Coordinates operator[](const size_t i) const {
-        assert(i < N);
-        return coords[i];
-    }
-};
 
 #define e Coordinates
-constexpr Offsets<5> kicks[2][Direction_NB][ROTATION_NB] = {
+constexpr OffsetsRot<5> kicks[2][Direction_NB] = {
     { // LJSZT
         { // CW
-            Offsets<5>(e( 0,  0), e(-1,  0), e(-1,  1), e( 0, -2), e(-1, -2)),
-            Offsets<5>(e( 0,  0), e( 1,  0), e( 1, -1), e( 0,  2), e( 1,  2)),
-            Offsets<5>(e( 0,  0), e( 1,  0), e( 1,  1), e( 0, -2), e( 1, -2)),
-            Offsets<5>(e( 0,  0), e(-1,  0), e(-1, -1), e( 0,  2), e(-1,  2))
+            e( 0,  0), e(-1,  0), e(-1,  1), e( 0, -2), e(-1, -2),
+            e( 0,  0), e( 1,  0), e( 1, -1), e( 0,  2), e( 1,  2),
+            e( 0,  0), e( 1,  0), e( 1,  1), e( 0, -2), e( 1, -2),
+            e( 0,  0), e(-1,  0), e(-1, -1), e( 0,  2), e(-1,  2)
         },
         { // CCW
-            Offsets<5>(e( 0,  0), e( 1,  0), e( 1,  1), e( 0, -2), e( 1, -2)),
-            Offsets<5>(e( 0,  0), e( 1,  0), e( 1, -1), e( 0,  2), e( 1,  2)),
-            Offsets<5>(e( 0,  0), e(-1,  0), e(-1,  1), e( 0, -2), e(-1, -2)),
-            Offsets<5>(e( 0,  0), e(-1,  0), e(-1, -1), e( 0,  2), e(-1,  2))
+            e( 0,  0), e( 1,  0), e( 1,  1), e( 0, -2), e( 1, -2),
+            e( 0,  0), e( 1,  0), e( 1, -1), e( 0,  2), e( 1,  2),
+            e( 0,  0), e(-1,  0), e(-1,  1), e( 0, -2), e(-1, -2),
+            e( 0,  0), e(-1,  0), e(-1, -1), e( 0,  2), e(-1,  2)
         }
     },
     { // I SRS+
         { // CW
-            Offsets<5>(e( 1,  0), e( 2,  0), e(-1,  0), e(-1, -1), e( 2,  2)),
-            Offsets<5>(e( 0, -1), e(-1, -1), e( 2, -1), e(-1,  1), e( 2, -2)),
-            Offsets<5>(e(-1,  0), e( 1,  0), e(-2,  0), e( 1,  1), e(-2, -2)),
-            Offsets<5>(e( 0,  1), e( 1,  1), e(-2,  1), e( 1, -1), e(-2,  2))
+            e( 1,  0), e( 2,  0), e(-1,  0), e(-1, -1), e( 2,  2),
+            e( 0, -1), e(-1, -1), e( 2, -1), e(-1,  1), e( 2, -2),
+            e(-1,  0), e( 1,  0), e(-2,  0), e( 1,  1), e(-2, -2),
+            e( 0,  1), e( 1,  1), e(-2,  1), e( 1, -1), e(-2,  2)
         },
         { // CCW
-            Offsets<5>(e( 0, -1), e(-1, -1), e( 2, -1), e( 2, -2), e(-1,  1)),
-            Offsets<5>(e(-1,  0), e(-2,  0), e( 1,  0), e(-2, -2), e( 1,  1)),
-            Offsets<5>(e( 0,  1), e(-2,  1), e( 1,  1), e(-2,  2), e( 1, -1)),
-            Offsets<5>(e( 1,  0), e( 2,  0), e(-1,  0), e( 2,  2), e(-1, -1))
+            e( 0, -1), e(-1, -1), e( 2, -1), e( 2, -2), e(-1,  1),
+            e(-1,  0), e(-2,  0), e( 1,  0), e(-2, -2), e( 1,  1),
+            e( 0,  1), e(-2,  1), e( 1,  1), e(-2,  2), e( 1, -1),
+            e( 1,  0), e( 2,  0), e(-1,  0), e( 2,  2), e(-1, -1)
         }
     }
 };
 
-constexpr Offsets<6> kicks180[2][ROTATION_NB] = {
+constexpr OffsetsRot<6> kicks180[2] = {
     { // LJSZT
-        Offsets<6>(e( 0,  0), e( 0,  1), e( 1,  1), e(-1,  1), e( 1,  0), e(-1,  0)),
-        Offsets<6>(e( 0,  0), e( 1,  0), e( 1,  2), e( 1,  1), e( 0,  2), e( 0,  1)),
-        Offsets<6>(e( 0,  0), e( 0, -1), e(-1, -1), e( 1, -1), e(-1,  0), e( 1,  0)),
-        Offsets<6>(e( 0,  0), e(-1,  0), e(-1,  2), e(-1,  1), e( 0,  2), e( 0,  1))
+        e( 0,  0), e( 0,  1), e( 1,  1), e(-1,  1), e( 1,  0), e(-1,  0),
+        e( 0,  0), e( 1,  0), e( 1,  2), e( 1,  1), e( 0,  2), e( 0,  1),
+        e( 0,  0), e( 0, -1), e(-1, -1), e( 1, -1), e(-1,  0), e( 1,  0),
+        e( 0,  0), e(-1,  0), e(-1,  2), e(-1,  1), e( 0,  2), e( 0,  1)
     },
     { // I
-        Offsets<6>(e( 1, -1), e( 1,  0), e( 2,  0), e( 0,  0), e( 2, -1), e( 0, -1)),
-        Offsets<6>(e(-1, -1), e( 0, -1), e( 0,  1), e( 0,  0), e(-1,  1), e(-1,  0)),
-        Offsets<6>(e(-1,  1), e(-1,  0), e(-2,  0), e( 0,  0), e(-2,  1), e( 0,  1)),
-        Offsets<6>(e( 1,  1), e( 0,  1), e( 0,  3), e( 0,  2), e( 1,  3), e( 1,  2))
+        e( 1, -1), e( 1,  0), e( 2,  0), e( 0,  0), e( 2, -1), e( 0, -1),
+        e(-1, -1), e( 0, -1), e( 0,  1), e( 0,  0), e(-1,  1), e(-1,  0),
+        e(-1,  1), e(-1,  0), e(-2,  0), e( 0,  0), e(-2,  1), e( 0,  1),
+        e( 1,  1), e( 0,  1), e( 0,  3), e( 0,  2), e( 1,  3), e( 1,  2)
     }
 };
 #undef e
